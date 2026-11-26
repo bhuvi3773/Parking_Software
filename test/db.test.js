@@ -280,4 +280,14 @@ describe('Valet SQLite Store & Chat State Machine', () => {
       /DATABASE_URL/
     );
   });
+
+  it('sets is_default_pin to false when custom defaultPin is provided', async () => {
+    const custom = createValetDb(':memory:', { defaultPin: '5678' });
+    await custom.init();
+    const settings = await custom.getSettings();
+    assert.equal(settings.is_default_pin, false);
+    assert.equal(await custom.verifyPin('5678'), true);
+    assert.equal(await custom.verifyPin('1234'), false);
+    await custom.close();
+  });
 });

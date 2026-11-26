@@ -75,11 +75,12 @@ export function createPostgresStore(connectionString, options = {}) {
         const client = await pool.connect();
         try {
           await client.query(POSTGRES_SCHEMA_SQL);
+          const isDefaultPin = defaultPin === '1234' ? 'true' : 'false';
           const defaults = [
             ['hotel_name', 'Grand Valet'],
             ['valet_whatsapp_phone', ''],
             ['valet_pin_hash', hashPin(defaultPin)],
-            ['is_default_pin', 'true'],
+            ['is_default_pin', isDefaultPin],
             ['session_secret', crypto.randomBytes(32).toString('hex')],
           ];
           for (const [k, v] of defaults) {
@@ -127,7 +128,7 @@ export function createPostgresStore(connectionString, options = {}) {
     return {
       hotel_name: map.hotel_name || 'Grand Valet',
       valet_whatsapp_phone: map.valet_whatsapp_phone || '',
-      is_default_pin: (map.is_default_pin || 'true') === 'true',
+      is_default_pin: defaultPin === '1234' && (map.is_default_pin || 'true') === 'true',
     };
   }
 

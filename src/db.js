@@ -110,11 +110,12 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
     `);
   }
 
+  const isDefaultPin = defaultPin === '1234' ? 'true' : 'false';
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
   insertSetting.run('hotel_name', 'Grand Valet');
   insertSetting.run('valet_whatsapp_phone', '');
   insertSetting.run('valet_pin_hash', hashPin(defaultPin));
-  insertSetting.run('is_default_pin', 'true');
+  insertSetting.run('is_default_pin', isDefaultPin);
   insertSetting.run('session_secret', crypto.randomBytes(32).toString('hex'));
 
   const getSettingStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
