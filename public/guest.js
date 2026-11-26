@@ -31,7 +31,9 @@ const feedbackText = document.getElementById('feedbackText');
 
 let currentTicket = null;
 let currentMessages = [];
+let lastMessageSignature = '';
 let eventSource = null;
+let pollTimer = null;
 
 function formatTime(iso) {
   if (!iso) return '';
@@ -75,6 +77,10 @@ function updateSteps(status) {
 }
 
 function renderMessages(messages) {
+  const sig = messages.map((m) => `${m.id}:${m.body}`).join('|');
+  if (sig === lastMessageSignature) return;
+  lastMessageSignature = sig;
+
   chatMessages.replaceChildren();
   for (const m of messages) {
     const row = document.createElement('div');
@@ -162,11 +168,40 @@ async function loadInitialTicket() {
     loadingCard.classList.add('hidden');
     chatFrame.classList.remove('hidden');
     renderAll(data.ticket, data.messages, data.hotel_name, data.wa_me_url);
-    connectSse();
+    if (data.realtimeMode === 'poll') {
+      startPolling();
+    } else {
+      connectSse();
+    }
   } catch {
     loadingCard.classList.add('hidden');
     errorCard.classList.remove('hidden');
   }
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  liveStatusText.textContent = 'Live updates connected';
+  pollTimer = setInterval(async () => {
+    if (
+      currentTicket &&
+      (currentTicket.status === 'completed' || currentTicket.status === 'cancelled')
+    ) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      return;
+    }
+    try {
+      const res = await fetch(`/api/tickets/${encodeURIComponent(ticketCode)}`);
+      if (res.ok) {
+        const data = await res.json();
+        renderAll(data.ticket, data.messages, data.hotel_name, data.wa_me_url);
+        liveStatusText.textContent = 'Live updates connected';
+      }
+    } catch {
+      liveStatusText.textContent = 'Reconnecting…';
+    }
+  }, 2000);
 }
 
 function connectSse() {

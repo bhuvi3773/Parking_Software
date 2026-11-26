@@ -2,7 +2,7 @@
 
 A free, zero-API two-sided hotel valet application (**Worker Side** + **Customer Side**).
 
-## Local Run
+## Local Run (Zero Config — Uses SQLite)
 
 ```bash
 npm install
@@ -11,19 +11,17 @@ npm start
 
 Open `http://localhost:4100` (default Valet PIN: `1234`).
 
-## 24/7 Cloud Deploy (Railway — No Credit Card Required on Free Plan)
+## Deploy to Vercel + Neon Postgres (Free — Works Everywhere)
 
-1. Go to [Railway](https://railway.app/new) → **Deploy from GitHub repo** → choose `bhuvi3773/Parking_Software`.
-   - Railway automatically picks up `Dockerfile` (Node 24) and `railway.json` (`/api/health` check).
-2. Open your service **Settings → Volumes → + New Volume** and set the mount path to `/data`.
-3. Open **Variables** and add:
-   - `VALET_DB_PATH=/data/valet.db`
-   - `VALET_PIN=<your-4-to-12-char-pin>`
-4. Open **Settings → Networking → Generate Domain** to get your permanent `https://...up.railway.app` URL.
-   - Keep instance replicas at `1` so all requests share the SQLite volume.
+1. Go to [Vercel](https://vercel.com/new), import `bhuvi3773/Parking_Software` from GitHub.
+2. Under **Environment Variables**, add:
+   - `DATABASE_URL` = your Neon Postgres pooled connection string
+   - `VALET_PIN` = your 4–12 digit Valet PIN (for example `5678`)
+3. Click **Deploy**. Vercel serves `public/` via CDN, routes `/api/*` to `api/index.js`, and runs `public/valet.html` (`/`) and `public/guest.html` (`/t/:code`).
 
-## Environment Variables (Optional)
+## Environment Variables
 
-- `PORT` (default `4100`, automatically injected by Railway/Fly)
-- `VALET_DB_PATH` (default `data/valet.db`, set `/data/valet.db` in cloud volumes)
-- `VALET_PIN` (default `1234` on fresh DB creation; can also be changed inside Settings)
+- `DATABASE_URL` — When set, uses PostgreSQL (Neon); when omitted locally, uses local SQLite (`data/valet.db`).
+- `VALET_PIN` — Initial Valet PIN when creating a fresh database (default `1234`; also changeable inside Settings).
+- `PORT` — Local HTTP port (default `4100`).
+- `VALET_DB_PATH` — Custom local SQLite path when `DATABASE_URL` is unset.

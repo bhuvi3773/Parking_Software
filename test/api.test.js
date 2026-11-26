@@ -5,13 +5,15 @@ import { createValetDb } from '../src/db.js';
 import { createSseHub } from '../src/sse.js';
 import { createApp } from '../src/app.js';
 
-function startTestServer() {
+async function startTestServer(extraOpts = {}) {
   const store = createValetDb(':memory:', { defaultPin: '1234' });
-  const sse = createSseHub({ heartbeatMs: 60000 });
+  await store.init();
+  const sse = createSseHub({ heartbeatMs: 60000, disabled: extraOpts.realtimeMode === 'poll' });
   const app = createApp({
     store,
     sse,
     resolveBaseUrl: () => 'http://192.168.1.50:4100',
+    realtimeMode: extraOpts.realtimeMode || 'sse',
   });
   return new Promise((resolve) => {
     const server = app.listen(0, '127.0.0.1', () => {
@@ -77,7 +79,7 @@ describe('Valet HTTP API & Two-Sided Chat SSE', () => {
   afterEach(async () => {
     ctx.sse.closeAll();
     await new Promise((resolve) => ctx.server.close(resolve));
-    ctx.store.close();
+    await ctx.store.close();
   });
 
   it('protects worker routes with PIN session auth', async () => {
@@ -283,11 +285,13 @@ describe('Valet HTTP API & Two-Sided Chat SSE', () => {
   it('sets Secure cookie and resolves https QR URLs behind reverse proxies', async () => {
     const { createBaseUrlResolver } = await import('../src/network.js');
     const proxyStore = createValetDb(':memory:', { defaultPin: '1234' });
+    await proxyStore.init();
     const proxySse = createSseHub({ heartbeatMs: 60000 });
     const proxyApp = createApp({
       store: proxyStore,
       sse: proxySse,
       resolveBaseUrl: createBaseUrlResolver(4100),
+      realtimeMode: 'poll',
     });
 
     const srv = await new Promise((resolve) => {
@@ -329,10 +333,11 @@ describe('Valet HTTP API & Two-Sided Chat SSE', () => {
         req.on('error', reject);
       });
       assert.equal(health.baseUrl, 'https://valet.up.railway.app');
+      assert.equal(health.realtimeMode, 'poll');
     } finally {
       proxySse.closeAll();
       await new Promise((resolve) => srv.close(resolve));
-      proxyStore.close();
+      await proxyStore.close();
     }
   });
 });

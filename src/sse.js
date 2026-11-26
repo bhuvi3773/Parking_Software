@@ -1,7 +1,7 @@
 /**
  * Manage Server-Sent Events (SSE) streams for worker consoles and customer chat views.
  */
-export function createSseHub({ heartbeatMs = 25000 } = {}) {
+export function createSseHub({ heartbeatMs = 25000, disabled = false } = {}) {
   const valetClients = new Set();
   const ticketClients = new Map();
 
@@ -20,6 +20,7 @@ export function createSseHub({ heartbeatMs = 25000 } = {}) {
   }
 
   function addValetClient(req, res) {
+    if (disabled) return res.status(204).end();
     setupHeaders(res);
     valetClients.add(res);
     req.on('close', () => {
@@ -28,6 +29,7 @@ export function createSseHub({ heartbeatMs = 25000 } = {}) {
   }
 
   function addTicketClient(code, req, res) {
+    if (disabled) return res.status(204).end();
     setupHeaders(res);
     let set = ticketClients.get(code);
     if (!set) {
@@ -44,6 +46,7 @@ export function createSseHub({ heartbeatMs = 25000 } = {}) {
   }
 
   function broadcastTicketChange(ticket, guestPayload) {
+    if (disabled) return;
     for (const res of valetClients) {
       sendEvent(res, 'ticket', ticket);
     }
@@ -56,6 +59,7 @@ export function createSseHub({ heartbeatMs = 25000 } = {}) {
   }
 
   function broadcastSettingsChange(settings) {
+    if (disabled) return;
     for (const res of valetClients) {
       sendEvent(res, 'settings', settings);
     }
@@ -69,20 +73,22 @@ export function createSseHub({ heartbeatMs = 25000 } = {}) {
     }
   }
 
-  const timer = setInterval(() => {
-    for (const res of valetClients) {
-      res.write(': ping\n\n');
-    }
-    for (const guests of ticketClients.values()) {
-      for (const res of guests) {
-        res.write(': ping\n\n');
-      }
-    }
-  }, heartbeatMs);
-  timer.unref();
+  const timer = disabled
+    ? null
+    : setInterval(() => {
+        for (const res of valetClients) {
+          res.write(': ping\n\n');
+        }
+        for (const guests of ticketClients.values()) {
+          for (const res of guests) {
+            res.write(': ping\n\n');
+          }
+        }
+      }, heartbeatMs);
+  if (timer) timer.unref();
 
   function closeAll() {
-    clearInterval(timer);
+    if (timer) clearInterval(timer);
     for (const res of valetClients) {
       res.end();
     }

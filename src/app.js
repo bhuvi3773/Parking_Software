@@ -73,20 +73,31 @@ function buildWaMeUrl(phone, ticket) {
 /**
  * Create the configured Express app for the two-sided QR Valet Chat system.
  */
-export function createApp({ store, sse, resolveBaseUrl }) {
+export function createApp({ store, sse, resolveBaseUrl, realtimeMode = 'sse' }) {
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '64kb' }));
 
-  const sessionSecret = store.getSessionSecret();
+  let initPromise = null;
+  app.use(async (_req, _res, next) => {
+    if (!initPromise) {
+      initPromise = Promise.resolve(store.init ? store.init() : undefined).catch((err) => {
+        initPromise = null;
+        throw err;
+      });
+    }
+    await initPromise;
+    next();
+  });
 
-  function isAuthenticated(req) {
+  async function isAuthenticated(req) {
     const cookies = parseCookies(req.headers.cookie);
-    return verifySessionToken(cookies[COOKIE_NAME], sessionSecret);
+    const secret = await store.getSessionSecret();
+    return verifySessionToken(cookies[COOKIE_NAME], secret);
   }
 
-  function requireValetAuth(req, res, next) {
-    if (!isAuthenticated(req)) {
+  async function requireValetAuth(req, res, next) {
+    if (!(await isAuthenticated(req))) {
       return res.status(401).json({ error: 'Valet PIN required' });
     }
     return next();
@@ -96,30 +107,33 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     res.json({
       ok: true,
       baseUrl: resolveBaseUrl(req),
+      realtimeMode,
     });
   });
 
-  app.get('/api/auth/session', (req, res) => {
-    const settings = store.getSettings();
+  app.get('/api/auth/session', async (req, res) => {
+    const settings = await store.getSettings();
     res.json({
-      authenticated: isAuthenticated(req),
+      authenticated: await isAuthenticated(req),
       is_default_pin: settings.is_default_pin,
       hotel_name: settings.hotel_name,
+      realtimeMode,
     });
   });
 
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const { pin } = req.body || {};
-    if (!store.verifyPin(pin)) {
+    if (!(await store.verifyPin(pin))) {
       return res.status(401).json({ error: 'Invalid valet PIN' });
     }
-    const token = signSessionToken(sessionSecret, Date.now() + SESSION_TTL_MS);
+    const secret = await store.getSessionSecret();
+    const token = signSessionToken(secret, Date.now() + SESSION_TTL_MS);
     const secureFlag = req.secure ? '; Secure' : '';
     res.setHeader(
       'Set-Cookie',
       `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax${secureFlag}; Max-Age=${SESSION_TTL_MS / 1000}`
     );
-    const settings = store.getSettings();
+    const settings = await store.getSettings();
     return res.json({
       authenticated: true,
       is_default_pin: settings.is_default_pin,
@@ -135,20 +149,23 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     res.json({ authenticated: false });
   });
 
-  app.get('/api/settings', requireValetAuth, (req, res) => {
+  app.get('/api/settings', requireValetAuth, async (req, res) => {
+    const settings = await store.getSettings();
     res.json({
-      ...store.getSettings(),
+      ...settings,
       baseUrl: resolveBaseUrl(req),
+      realtimeMode,
     });
   });
 
-  app.put('/api/settings', requireValetAuth, (req, res) => {
+  app.put('/api/settings', requireValetAuth, async (req, res) => {
     try {
-      const updated = store.updateSettings(req.body || {});
+      const updated = await store.updateSettings(req.body || {});
       sse.broadcastSettingsChange(updated);
       res.json({
         ...updated,
         baseUrl: resolveBaseUrl(req),
+        realtimeMode,
       });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -159,13 +176,13 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     sse.addValetClient(req, res);
   });
 
-  app.get('/api/tickets', requireValetAuth, (_req, res) => {
-    res.json(store.listTickets());
+  app.get('/api/tickets', requireValetAuth, async (_req, res) => {
+    res.json(await store.listTickets());
   });
 
   app.post('/api/tickets', requireValetAuth, async (req, res) => {
     try {
-      const ticket = store.createTicket(req.body || {});
+      const ticket = await store.createTicket(req.body || {});
       const guestUrl = `${resolveBaseUrl(req)}/t/${ticket.code}`;
       const qrDataUrl = await QRCode.toDataURL(guestUrl, {
         width: 320,
@@ -179,9 +196,9 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     }
   });
 
-  app.patch('/api/tickets/:code', requireValetAuth, (req, res) => {
+  app.patch('/api/tickets/:code', requireValetAuth, async (req, res) => {
     try {
-      const updated = store.editTicket(req.params.code, req.body || {});
+      const updated = await store.editTicket(req.params.code, req.body || {});
       if (!updated) {
         return res.status(404).json({ error: 'Ticket not found' });
       }
@@ -192,9 +209,9 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     }
   });
 
-  app.post('/api/tickets/:code/reply', requireValetAuth, (req, res) => {
+  app.post('/api/tickets/:code/reply', requireValetAuth, async (req, res) => {
     try {
-      const result = store.addWorkerMessage(req.params.code, req.body?.body);
+      const result = await store.addWorkerMessage(req.params.code, req.body?.body);
       if (!result.found) {
         return res.status(404).json({ error: 'Ticket not found' });
       }
@@ -205,8 +222,8 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     }
   });
 
-  app.post('/api/tickets/:code/entrance', requireValetAuth, (req, res) => {
-    const result = store.markAtEntrance(req.params.code, req.body?.message);
+  app.post('/api/tickets/:code/entrance', requireValetAuth, async (req, res) => {
+    const result = await store.markAtEntrance(req.params.code, req.body?.message);
     if (!result.found) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
@@ -220,8 +237,8 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     });
   });
 
-  app.post('/api/tickets/:code/complete', requireValetAuth, (req, res) => {
-    const result = store.markCompleted(req.params.code);
+  app.post('/api/tickets/:code/complete', requireValetAuth, async (req, res) => {
+    const result = await store.markCompleted(req.params.code);
     if (!result.found) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
@@ -235,9 +252,9 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     });
   });
 
-  app.post('/api/tickets/:code/cancel', requireValetAuth, (req, res) => {
+  app.post('/api/tickets/:code/cancel', requireValetAuth, async (req, res) => {
     const { pin } = req.body || {};
-    const result = store.cancelTicket(req.params.code, pin);
+    const result = await store.cancelTicket(req.params.code, pin);
     if (!result.ok) {
       return res.status(403).json({ error: 'Valid valet PIN is required to cancel a ticket' });
     }
@@ -255,24 +272,25 @@ export function createApp({ store, sse, resolveBaseUrl }) {
   });
 
   // Public Customer Side APIs (scoped by random 8-char capability code)
-  app.get('/api/tickets/:code', (req, res) => {
-    const scanRes = store.markScanned(req.params.code);
+  app.get('/api/tickets/:code', async (req, res) => {
+    const scanRes = await store.markScanned(req.params.code);
     if (!scanRes.found) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
     if (scanRes.newlyScanned) {
       sse.broadcastTicketChange(scanRes.ticket, toGuestPayload(scanRes.ticket));
     }
-    const settings = store.getSettings();
+    const settings = await store.getSettings();
     return res.json({
       ...toGuestPayload(scanRes.ticket),
       hotel_name: settings.hotel_name,
       wa_me_url: buildWaMeUrl(settings.valet_whatsapp_phone, scanRes.ticket),
+      realtimeMode,
     });
   });
 
-  app.post('/api/tickets/:code/request', (req, res) => {
-    const result = store.requestPickup(req.params.code, req.body?.message);
+  app.post('/api/tickets/:code/request', async (req, res) => {
+    const result = await store.requestPickup(req.params.code, req.body?.message);
     if (!result.found) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
@@ -286,9 +304,9 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     });
   });
 
-  app.post('/api/tickets/:code/messages', (req, res) => {
+  app.post('/api/tickets/:code/messages', async (req, res) => {
     try {
-      const result = store.addCustomerMessage(req.params.code, req.body?.body);
+      const result = await store.addCustomerMessage(req.params.code, req.body?.body);
       if (!result.found) {
         return res.status(404).json({ error: 'Ticket not found' });
       }
@@ -299,8 +317,8 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     }
   });
 
-  app.get('/api/tickets/:code/events', (req, res) => {
-    const ticket = store.getTicketByCode(req.params.code);
+  app.get('/api/tickets/:code/events', async (req, res) => {
+    const ticket = await store.getTicketByCode(req.params.code);
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
@@ -308,7 +326,7 @@ export function createApp({ store, sse, resolveBaseUrl }) {
   });
 
   app.get('/api/tickets/:code/qr', async (req, res) => {
-    const ticket = store.getTicketByCode(req.params.code);
+    const ticket = await store.getTicketByCode(req.params.code);
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket not found' });
     }

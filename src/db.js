@@ -2,36 +2,18 @@ import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-
-const ACTIVE_STATUSES = new Set(['parked', 'requested', 'at_entrance']);
-
-function hashPin(pin) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const derived = crypto.scryptSync(String(pin), salt, 32).toString('hex');
-  return `${salt}:${derived}`;
-}
-
-function checkPinHash(pin, stored) {
-  if (!stored || !stored.includes(':')) return false;
-  const [salt, expectedHex] = stored.split(':');
-  const derived = crypto.scryptSync(String(pin), salt, 32);
-  const expected = Buffer.from(expectedHex, 'hex');
-  if (derived.length !== expected.length) return false;
-  return crypto.timingSafeEqual(derived, expected);
-}
-
-function normalizePhone(raw) {
-  if (!raw) return '';
-  return String(raw).replace(/[^\d]/g, '');
-}
-
-function generateTicketCode() {
-  return crypto.randomBytes(6).toString('base64url');
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
+import {
+  ACTIVE_STATUSES,
+  buildEntranceMessage,
+  buildWelcomeMessage,
+  checkPinHash,
+  generateTicketCode,
+  getAlreadyEntranceMessage,
+  getAlreadyRequestedMessage,
+  hashPin,
+  normalizePhone,
+  nowIso,
+} from './store-helpers.js';
 
 /**
  * Create and initialize the SQLite-backed valet ticket & chat store.
@@ -51,7 +33,6 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
   }
   db.exec('PRAGMA foreign_keys = ON;');
 
-  // Migrate legacy schema if an older pre-chat valet.db exists
   const existingCols = db.prepare('PRAGMA table_info(tickets)').all().map((c) => c.name);
   const needsLegacyMigration = existingCols.length > 0 && !existingCols.includes('car_number');
   if (needsLegacyMigration) {
@@ -154,31 +135,51 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
     ) VALUES (?, ?, ?, ?, ?, ?, 'parked', ?)
   `);
 
-  function getSetting(key, fallback = '') {
+  function getSettingSync(key, fallback = '') {
     const row = getSettingStmt.get(key);
     return row ? row.value : fallback;
   }
 
-  function getSessionSecret() {
-    return getSetting('session_secret');
-  }
-
-  function getSettings() {
+  function getSettingsSync() {
     return {
-      hotel_name: getSetting('hotel_name', 'Grand Valet'),
-      valet_whatsapp_phone: getSetting('valet_whatsapp_phone', ''),
-      is_default_pin: getSetting('is_default_pin', 'true') === 'true',
+      hotel_name: getSettingSync('hotel_name', 'Grand Valet'),
+      valet_whatsapp_phone: getSettingSync('valet_whatsapp_phone', ''),
+      is_default_pin: getSettingSync('is_default_pin', 'true') === 'true',
     };
   }
 
-  function verifyPin(pin) {
+  function verifyPinSync(pin) {
     if (typeof pin !== 'string' && typeof pin !== 'number') return false;
     const trimmed = String(pin).trim();
     if (!trimmed) return false;
-    return checkPinHash(trimmed, getSetting('valet_pin_hash'));
+    return checkPinHash(trimmed, getSettingSync('valet_pin_hash'));
   }
 
-  function updateSettings({ hotel_name, valet_whatsapp_phone, valet_pin } = {}) {
+  function hydrateTicket(ticket) {
+    if (!ticket) return null;
+    return {
+      ...ticket,
+      messages: getMessagesStmt.all(ticket.id),
+    };
+  }
+
+  async function init() {
+    // SQLite schema initializes synchronously above.
+  }
+
+  async function getSessionSecret() {
+    return getSettingSync('session_secret');
+  }
+
+  async function getSettings() {
+    return getSettingsSync();
+  }
+
+  async function verifyPin(pin) {
+    return verifyPinSync(pin);
+  }
+
+  async function updateSettings({ hotel_name, valet_whatsapp_phone, valet_pin } = {}) {
     if (hotel_name !== undefined) {
       const cleaned = String(hotel_name).trim();
       if (!cleaned) {
@@ -197,32 +198,19 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
       upsertSettingStmt.run('valet_pin_hash', hashPin(nextPin));
       upsertSettingStmt.run('is_default_pin', 'false');
     }
-    return getSettings();
+    return getSettingsSync();
   }
 
-  function getMessages(ticketId) {
+  async function getMessages(ticketId) {
     return getMessagesStmt.all(ticketId);
   }
 
-  function hydrateTicket(ticket) {
-    if (!ticket) return null;
-    return {
-      ...ticket,
-      messages: getMessages(ticket.id),
-    };
-  }
-
-  function getTicketByCode(code) {
+  async function getTicketByCode(code) {
     if (!code) return null;
     return hydrateTicket(getTicketByCodeStmt.get(String(code).trim()));
   }
 
-  function getNextValetNumberPreview() {
-    const { max_num } = getMaxTicketNumberStmt.get();
-    return String(Number(max_num) + 1);
-  }
-
-  function listTickets() {
+  async function listTickets() {
     const activeRows = db
       .prepare(
         `SELECT * FROM tickets
@@ -247,14 +235,15 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
       )
       .all();
 
+    const { max_num } = getMaxTicketNumberStmt.get();
     return {
       active: activeRows.map(hydrateTicket),
       history: historyRows.map(hydrateTicket),
-      next_valet_number: getNextValetNumberPreview(),
+      next_valet_number: String(Number(max_num) + 1),
     };
   }
 
-  function createTicket({ car_number, customer_name, valet_number = '', parking_spot = '' }) {
+  async function createTicket({ car_number, customer_name, valet_number = '', parking_spot = '' }) {
     const cleanCar = String(car_number || '').trim();
     const cleanCustomer = String(customer_name || '').trim();
     const cleanSpot = String(parking_spot || '').trim();
@@ -283,19 +272,19 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
         createdAt
       );
 
-      const hotelName = getSetting('hotel_name', 'Grand Valet');
-      const hiMessage = `Hi ${cleanCustomer}! Welcome to ${hotelName}. Your car (${cleanCar}) is safely parked under Valet #${cleanValet}. Send "I am ready to leave" here whenever you want your car at the entrance.`;
+      const hotelName = getSettingSync('hotel_name', 'Grand Valet');
+      const hiMessage = buildWelcomeMessage(cleanCustomer, hotelName, cleanCar, cleanValet);
       insertMessageStmt.run(info.lastInsertRowid, 'worker', hiMessage, createdAt);
 
       db.exec('COMMIT');
-      return getTicketByCode(code);
+      return hydrateTicket(getTicketByCodeStmt.get(code));
     } catch (err) {
       db.exec('ROLLBACK');
       throw err;
     }
   }
 
-  function markScanned(code) {
+  async function markScanned(code) {
     db.exec('BEGIN IMMEDIATE');
     try {
       const ticket = getTicketByCodeStmt.get(String(code || '').trim());
@@ -313,7 +302,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
         return {
           found: true,
           newlyScanned: res.changes > 0,
-          ticket: getTicketByCode(ticket.code),
+          ticket: hydrateTicket(getTicketByCodeStmt.get(ticket.code)),
         };
       }
 
@@ -329,7 +318,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
     }
   }
 
-  function editTicket(code, updates = {}) {
+  async function editTicket(code, updates = {}) {
     const existing = getTicketByCodeStmt.get(String(code || '').trim());
     if (!existing) return null;
     if (!ACTIVE_STATUSES.has(existing.status)) {
@@ -363,10 +352,10 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
       existing.code
     );
 
-    return getTicketByCode(existing.code);
+    return hydrateTicket(getTicketByCodeStmt.get(existing.code));
   }
 
-  function requestPickup(code, customText = 'I am ready to leave') {
+  async function requestPickup(code, customText = 'I am ready to leave') {
     const cleanText = String(customText || '').trim() || 'I am ready to leave';
 
     db.exec('BEGIN IMMEDIATE');
@@ -389,23 +378,17 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
         return {
           found: true,
           alreadyUpdated: res.changes === 0,
-          ticket: getTicketByCode(ticket.code),
+          ticket: hydrateTicket(getTicketByCodeStmt.get(ticket.code)),
           message: 'Your valet has been alerted and is retrieving your car.',
         };
       }
 
       db.exec('COMMIT');
-      const messages = {
-        requested: 'Your valet has already been alerted and is on the way to get your car.',
-        at_entrance: 'Your car is already waiting at the entrance!',
-        completed: 'This ticket is already completed. Thanks for visiting!',
-        cancelled: 'This ticket was cancelled and your keys were returned.',
-      };
       return {
         found: true,
         alreadyUpdated: true,
         ticket: hydrateTicket(ticket),
-        message: messages[ticket.status] || 'Ticket status unchanged.',
+        message: getAlreadyRequestedMessage(ticket.status),
       };
     } catch (err) {
       db.exec('ROLLBACK');
@@ -413,7 +396,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
     }
   }
 
-  function addCustomerMessage(code, body) {
+  async function addCustomerMessage(code, body) {
     const cleanBody = String(body || '').trim();
     if (!cleanBody) throw new Error('Message cannot be empty');
 
@@ -443,7 +426,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
       return {
         found: true,
         statusChanged,
-        ticket: getTicketByCode(ticket.code),
+        ticket: hydrateTicket(getTicketByCodeStmt.get(ticket.code)),
       };
     } catch (err) {
       db.exec('ROLLBACK');
@@ -451,7 +434,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
     }
   }
 
-  function addWorkerMessage(code, body) {
+  async function addWorkerMessage(code, body) {
     const cleanBody = String(body || '').trim();
     if (!cleanBody) throw new Error('Message cannot be empty');
 
@@ -471,7 +454,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
       db.exec('COMMIT');
       return {
         found: true,
-        ticket: getTicketByCode(ticket.code),
+        ticket: hydrateTicket(getTicketByCodeStmt.get(ticket.code)),
       };
     } catch (err) {
       db.exec('ROLLBACK');
@@ -479,7 +462,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
     }
   }
 
-  function markAtEntrance(code, customMessage = '') {
+  async function markAtEntrance(code, customMessage = '') {
     db.exec('BEGIN IMMEDIATE');
     try {
       const ticket = getTicketByCodeStmt.get(String(code || '').trim());
@@ -501,31 +484,25 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
           .run(ts, ts, ticket.code);
 
         if (res.changes > 0) {
-          const defaultMsg = `Your car (${ticket.car_number}, Valet #${ticket.valet_number}) is ready at the entrance! Please collect your keys and have a safe drive.`;
-          const body = String(customMessage || '').trim() || defaultMsg;
-          insertMessageStmt.run(ticket.id, 'worker', body.slice(0, 500), ts);
+          const msg = buildEntranceMessage(ticket.car_number, ticket.valet_number, customMessage);
+          insertMessageStmt.run(ticket.id, 'worker', msg, ts);
         }
 
         db.exec('COMMIT');
         return {
           found: true,
           alreadyUpdated: res.changes === 0,
-          ticket: getTicketByCode(ticket.code),
+          ticket: hydrateTicket(getTicketByCodeStmt.get(ticket.code)),
           message: res.changes > 0 ? 'Car marked as ready at entrance.' : 'Already updated by another worker.',
         };
       }
 
       db.exec('COMMIT');
-      const messages = {
-        at_entrance: 'Already marked at entrance by another worker.',
-        completed: 'This ticket was already marked as picked up.',
-        cancelled: 'This ticket was already cancelled.',
-      };
       return {
         found: true,
         alreadyUpdated: true,
         ticket: hydrateTicket(ticket),
-        message: messages[ticket.status] || 'Already updated.',
+        message: getAlreadyEntranceMessage(ticket.status),
       };
     } catch (err) {
       db.exec('ROLLBACK');
@@ -533,7 +510,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
     }
   }
 
-  function markCompleted(code) {
+  async function markCompleted(code) {
     db.exec('BEGIN IMMEDIATE');
     try {
       const ticket = getTicketByCodeStmt.get(String(code || '').trim());
@@ -559,7 +536,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
         return {
           found: true,
           alreadyUpdated: res.changes === 0,
-          ticket: getTicketByCode(ticket.code),
+          ticket: hydrateTicket(getTicketByCodeStmt.get(ticket.code)),
           message: res.changes > 0 ? 'Handover completed.' : 'Already completed by another worker.',
         };
       }
@@ -580,8 +557,8 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
     }
   }
 
-  function cancelTicket(code, pin) {
-    if (!verifyPin(pin)) {
+  async function cancelTicket(code, pin) {
+    if (!verifyPinSync(pin)) {
       return { ok: false, reason: 'invalid_pin' };
     }
 
@@ -616,7 +593,7 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
           ok: true,
           found: true,
           alreadyUpdated: res.changes === 0,
-          ticket: getTicketByCode(ticket.code),
+          ticket: hydrateTicket(getTicketByCodeStmt.get(ticket.code)),
           message: res.changes > 0 ? 'Ticket cancelled.' : 'Already cancelled by another worker.',
         };
       }
@@ -638,11 +615,12 @@ export function createValetDb(dbPath = 'data/valet.db', options = {}) {
     }
   }
 
-  function close() {
+  async function close() {
     db.close();
   }
 
   return {
+    init,
     getSettings,
     updateSettings,
     verifyPin,

@@ -87,6 +87,7 @@ let state = {
   editingCode: null,
   cancellingCode: null,
   sse: null,
+  pollTimer: null,
 };
 
 let toastTimer = null;
@@ -415,7 +416,53 @@ async function loadTicketsAndSettings() {
   if (state.active.length > 0 && !state.activeQrCode) {
     showInlineQr(state.active[0]);
   }
-  connectValetSse();
+  if (settingsData.realtimeMode === 'poll') {
+    startValetPolling();
+  } else {
+    connectValetSse();
+  }
+}
+
+function applyPolledTickets(data) {
+  const prevByCode = new Map(
+    [...state.active, ...state.history].map((t) => [t.code, JSON.stringify(t)])
+  );
+  const incoming = [...(data.active || []), ...(data.history || [])];
+  for (const ticket of incoming) {
+    if (prevByCode.get(ticket.code) !== JSON.stringify(ticket)) {
+      upsertTicketFromSse(ticket);
+    }
+  }
+  state.active = data.active || [];
+  state.history = data.history || [];
+  renderAll();
+}
+
+function startValetPolling() {
+  if (state.sse) {
+    state.sse.close();
+    state.sse = null;
+  }
+  if (state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
+  }
+  sseStatusText.textContent = 'Live';
+  state.pollTimer = setInterval(async () => {
+    try {
+      const res = await fetch('/api/tickets');
+      if (res.status === 401) {
+        showLockScreen();
+        return;
+      }
+      if (res.ok) {
+        sseStatusText.textContent = 'Live';
+        applyPolledTickets(await res.json());
+      }
+    } catch {
+      sseStatusText.textContent = 'Reconnecting…';
+    }
+  }, 2000);
 }
 
 function connectValetSse() {
@@ -680,6 +727,10 @@ function showLockScreen(sessionInfo = null) {
   if (state.sse) {
     state.sse.close();
     state.sse = null;
+  }
+  if (state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
   }
   podiumApp.classList.add('hidden');
   lockScreen.classList.remove('hidden');
