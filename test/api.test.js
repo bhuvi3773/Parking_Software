@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createValetDb } from '../src/db.js';
 import { createSseHub } from '../src/sse.js';
-import { createApp } from '../src/app.js';
+import { createApp } from '../src/create-app.js';
 
 async function startTestServer(extraOpts = {}) {
   const store = createValetDb(':memory:', { defaultPin: '1234' });

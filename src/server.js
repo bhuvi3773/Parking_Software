@@ -1,7 +1,7 @@
 import { createStore } from './store.js';
 import { createSseHub } from './sse.js';
 import { createBaseUrlResolver, getLanIp } from './network.js';
-import { createApp } from './app.js';
+import { createApp } from './create-app.js';
 
 const PORT = Number(process.env.PORT || 4100);
 

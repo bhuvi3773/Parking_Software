@@ -1,7 +1,7 @@
 import { createStore } from '../src/store.js';
 import { createSseHub } from '../src/sse.js';
 import { createBaseUrlResolver } from '../src/network.js';
-import { createApp } from '../src/app.js';
+import { createApp } from '../src/create-app.js';
 
 const store = createStore();
 const sse = createSseHub({ disabled: true });
