@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Customer Valet Chat</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="chat-shell">
+      <section id="loadingCard" class="chat-frame" style="justify-content: center; align-items: center; padding: 24px">
+        <p style="margin: 0; color: var(--ink-soft)">Connecting to valet chat…</p>
+      </section>
+
+      <section id="errorCard" class="chat-frame hidden" style="justify-content: center; padding: 24px">
+        <div style="background: #fff; border-radius: 14px; padding: 20px; border: 1px solid var(--border)">
+          <h2 style="margin: 0 0 8px">Valet ticket not found</h2>
+          <p style="margin: 0; color: var(--muted)">
+            Please check with the valet worker at the entrance for your keys.
+          </p>
+        </div>
+      </section>
+
+      <section id="chatFrame" class="chat-frame hidden" aria-live="polite">
+        <header class="chat-topbar">
+          <div class="chat-peer">
+            <div id="hotelAvatar" class="chat-avatar">V</div>
+            <div style="min-width: 0">
+              <h1 id="hotelName" class="chat-title">Grand Valet · Customer Side</h1>
+              <div id="chatHeaderSub" class="chat-sub mono">Valet #101</div>
+            </div>
+          </div>
+          <span id="statusBadge" class="badge badge-parked">Parked</span>
+        </header>
+
+        <div class="chat-info-strip">
+          <div class="info-chips">
+            <span id="chipCustomer" class="info-chip"></span>
+            <span id="chipCar" class="info-chip mono"></span>
+            <span id="chipValet" class="info-chip mono"></span>
+          </div>
+          <div class="steps-track">
+            <div id="stepParked" class="step-pill">Parked</div>
+            <div id="stepRequested" class="step-pill">Requested</div>
+            <div id="stepEntrance" class="step-pill">At Entrance</div>
+          </div>
+        </div>
+
+        <div id="chatMessages" class="chat-messages"></div>
+
+        <div class="chat-dock">
+          <div id="quickActionBar" class="quick-action-bar">
+            <button id="readyBtn" type="button" class="btn btn-wa" style="width: 100%">
+              I am ready to leave
+            </button>
+          </div>
+
+          <div id="requestedBanner" class="requested-alert-bar hidden">
+            Valet notified — retrieving your car and keys now.
+          </div>
+
+          <div id="entranceBanner" class="entrance-alert-bar hidden">
+            Your car is placed at the entrance! Please collect your keys.
+          </div>
+
+          <form id="chatComposer" class="chat-composer">
+            <input
+              id="messageInput"
+              type="text"
+              placeholder="Message valet (e.g. I am ready to leave)…"
+            />
+            <button id="sendMsgBtn" type="submit" class="btn btn-wa btn-sm">Send</button>
+          </form>
+
+          <div id="waWrap" class="hidden" style="text-align: center">
+            <a id="waLink" class="btn btn-secondary btn-sm" target="_blank" rel="noopener noreferrer">
+              Open in Real WhatsApp
+            </a>
+          </div>
+
+          <div class="chat-meta-footer">
+            <span id="liveStatusText">Live updates connected</span>
+            <span id="feedbackText"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/guest.js"></script>
+  </body>
+</html>

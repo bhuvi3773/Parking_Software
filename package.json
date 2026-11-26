@@ -1,0 +1,16 @@
+{
+  "name": "qr-valet-parking",
+  "version": "1.0.0",
+  "description": "Zero-cost QR-to-Web-Ticket hotel valet parking system",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "dev": "node --no-warnings --watch src/server.js",
+    "test": "node --no-warnings --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "qrcode": "^1.5.4"
+  }
+}

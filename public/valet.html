@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Valet Worker Side</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <!-- PIN Unlock Screen -->
+    <div id="lockScreen" class="lock-wrap hidden">
+      <form id="loginForm" class="lock-card">
+        <h1>Valet Worker Unlock</h1>
+        <p id="lockHotelLabel">Enter the shared Valet PIN to access the Worker Side.</p>
+        <div id="defaultPinHint" class="hint-box hidden">
+          Default PIN is <strong class="mono">1234</strong>. You can change it inside Settings.
+        </div>
+        <div class="field">
+          <label for="pinInput">Valet PIN</label>
+          <input
+            id="pinInput"
+            type="password"
+            inputmode="numeric"
+            autocomplete="current-password"
+            placeholder="Enter PIN"
+            required
+          />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%">Unlock Worker Screen</button>
+        <p id="loginError" class="error-text hidden"></p>
+      </form>
+    </div>
+
+    <!-- Main Worker Console -->
+    <div id="podiumApp" class="hidden">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">V</div>
+          <div>
+            <h1 id="podiumHotelName">Grand Valet · Worker Side</h1>
+            <div id="lanInfo" class="brand-sub mono"></div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span id="sseStatus" class="live-pill">
+            <span class="live-dot"></span>
+            <span id="sseStatusText">Live</span>
+          </span>
+          <button id="soundToggleBtn" type="button" class="btn btn-secondary btn-sm">
+            Enable Sound Alerts
+          </button>
+          <button id="settingsBtn" type="button" class="btn btn-secondary btn-sm">Settings</button>
+          <button id="lockBtn" type="button" class="btn btn-secondary btn-sm">Lock</button>
+        </div>
+      </header>
+
+      <main class="podium-grid">
+        <!-- Left Column: Check-In + Inline QR Display on Worker Side -->
+        <div class="left-stack">
+          <section class="panel">
+            <h2 class="panel-title">Receive Keys &amp; Generate QR</h2>
+            <form id="checkinForm">
+              <div class="field">
+                <label for="carNumberInput">Car Number</label>
+                <input
+                  id="carNumberInput"
+                  type="text"
+                  placeholder="e.g. KA01-AB-1234"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="customerNameInput">Customer Name</label>
+                <input
+                  id="customerNameInput"
+                  type="text"
+                  placeholder="e.g. Riya Sharma"
+                  required
+                />
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="valetNumberInput">Valet Number (Key Tag)</label>
+                  <input id="valetNumberInput" type="text" placeholder="e.g. 101" required />
+                </div>
+                <div class="field">
+                  <label for="parkingSpotInput">Parking Spot (optional)</label>
+                  <input id="parkingSpotInput" type="text" placeholder="e.g. B2-08" />
+                </div>
+              </div>
+              <button id="createBtn" type="submit" class="btn btn-primary" style="width: 100%">
+                Generate QR Code
+              </button>
+              <p id="checkinError" class="error-text hidden"></p>
+            </form>
+          </section>
+
+          <!-- Live QR displayed directly on the Worker Side -->
+          <section id="activeQrCard" class="panel hidden">
+            <div class="panel-title">
+              <span id="qrCardHeading">Customer QR Code</span>
+              <span id="qrScanStatusBadge" class="badge badge-unscanned">Waiting for scan…</span>
+            </div>
+            <div class="inline-qr-box">
+              <img id="inlineQrImage" alt="Scan to open Customer Side" />
+              <div id="inlineQrDetails" class="qr-summary"></div>
+              <div id="inlineQrUrl" class="qr-url mono"></div>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap">
+              <button id="copyInlineQrBtn" type="button" class="btn btn-secondary btn-sm" style="flex: 1">
+                Copy Link
+              </button>
+              <a
+                id="openInlineCustomerBtn"
+                class="btn btn-wa btn-sm"
+                style="flex: 1"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open Customer Side
+              </a>
+            </div>
+          </section>
+        </div>
+
+        <!-- Right Column: Live Requests & Cars -->
+        <section>
+          <div class="queue-section">
+            <div class="section-header">
+              <h2>Ready to Leave — Customer Messages (<span id="requestedCount">0</span>)</h2>
+            </div>
+            <div id="requestedList" class="ticket-list"></div>
+          </div>
+
+          <div class="queue-section">
+            <div class="section-header">
+              <h2>Placed at Entrance (<span id="entranceCount">0</span>)</h2>
+            </div>
+            <div id="entranceList" class="ticket-list"></div>
+          </div>
+
+          <div class="queue-section">
+            <div class="section-header">
+              <h2>Parked (<span id="parkedCount">0</span>)</h2>
+            </div>
+            <div id="parkedList" class="ticket-list"></div>
+          </div>
+
+          <div class="queue-section">
+            <div class="section-header">
+              <h2>Recent History (<span id="historyCount">0</span>)</h2>
+            </div>
+            <div id="historyList" class="ticket-list"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Worker <-> Customer Chat Modal -->
+    <div id="chatModal" class="modal-backdrop hidden">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="chatModalTitle">Customer Chat</h3>
+          <button id="closeChatModal" type="button" class="btn btn-secondary btn-sm">Close</button>
+        </div>
+        <div id="chatModalSub" style="font-size: 13px; color: var(--muted); margin-bottom: 10px"></div>
+        <div id="workerChatFeed" class="worker-chat-feed"></div>
+        <form id="workerReplyForm" class="worker-chat-compose">
+          <input
+            id="workerReplyInput"
+            type="text"
+            placeholder="Send message to customer…"
+            required
+          />
+          <button type="submit" class="btn btn-primary btn-sm">Send</button>
+        </form>
+        <div class="modal-footer" style="justify-content: space-between">
+          <button id="modalEntranceBtn" type="button" class="btn btn-amber btn-sm">
+            Send: Car Ready at Entrance
+          </button>
+          <button id="modalCompleteBtn" type="button" class="btn btn-emerald btn-sm hidden">
+            Mark Picked Up
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal-backdrop hidden">
+      <form id="editForm" class="modal">
+        <div class="modal-header">
+          <h3 id="editModalTitle">Edit Details</h3>
+          <button id="closeEditModal" type="button" class="btn btn-secondary btn-sm">Cancel</button>
+        </div>
+        <div class="field">
+          <label for="editCarNumber">Car Number</label>
+          <input id="editCarNumber" type="text" required />
+        </div>
+        <div class="field">
+          <label for="editCustomerName">Customer Name</label>
+          <input id="editCustomerName" type="text" required />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="editValetNumber">Valet Number (Key Tag)</label>
+            <input id="editValetNumber" type="text" required />
+          </div>
+          <div class="field">
+            <label for="editParkingSpot">Parking Spot (optional)</label>
+            <input id="editParkingSpot" type="text" />
+          </div>
+        </div>
+        <p id="editError" class="error-text hidden"></p>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Cancel Modal (PIN Confirmed) -->
+    <div id="cancelModal" class="modal-backdrop hidden">
+      <form id="cancelForm" class="modal">
+        <div class="modal-header">
+          <h3 id="cancelModalTitle">Cancel Ticket</h3>
+          <button id="closeCancelModal" type="button" class="btn btn-secondary btn-sm">Back</button>
+        </div>
+        <p style="margin: 0 0 14px; font-size: 14px; color: var(--ink-soft)">
+          Use this if keys were returned immediately or the entry was created by mistake. Enter the Valet PIN to confirm.
+        </p>
+        <div class="field">
+          <label for="cancelPinInput">Valet PIN</label>
+          <input id="cancelPinInput" type="password" inputmode="numeric" placeholder="Enter PIN" required />
+        </div>
+        <p id="cancelError" class="error-text hidden"></p>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-danger-outline">Confirm Cancel Ticket</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal-backdrop hidden">
+      <form id="settingsForm" class="modal">
+        <div class="modal-header">
+          <h3>Worker Side Settings</h3>
+          <button id="closeSettingsModal" type="button" class="btn btn-secondary btn-sm">Close</button>
+        </div>
+        <div class="field">
+          <label for="settingHotelName">Hotel / Venue Name</label>
+          <input id="settingHotelName" type="text" required />
+        </div>
+        <div class="field">
+          <label for="settingWaPhone">Valet WhatsApp Number (optional fallback)</label>
+          <input id="settingWaPhone" type="text" placeholder="e.g. 919876543210" />
+        </div>
+        <div class="field">
+          <label for="settingNewPin">New Valet PIN (leave blank to keep current)</label>
+          <input id="settingNewPin" type="password" inputmode="numeric" placeholder="4–12 characters" />
+        </div>
+        <p id="settingsError" class="error-text hidden"></p>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Save Settings</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="toast" class="toast hidden" role="status"></div>
+
+    <script type="module" src="/valet.js"></script>
+  </body>
+</html>
