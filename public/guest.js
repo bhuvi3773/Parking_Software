@@ -172,9 +172,22 @@ async function loadInitialTicket() {
 function connectSse() {
   if (eventSource) eventSource.close();
   eventSource = new EventSource(`/api/tickets/${encodeURIComponent(ticketCode)}/events`);
+  let openedOnce = false;
 
-  eventSource.onopen = () => {
+  eventSource.onopen = async () => {
     liveStatusText.textContent = 'Live updates connected';
+    if (openedOnce) {
+      try {
+        const res = await fetch(`/api/tickets/${encodeURIComponent(ticketCode)}`);
+        if (res.ok) {
+          const data = await res.json();
+          renderAll(data.ticket, data.messages, data.hotel_name, data.wa_me_url);
+        }
+      } catch {
+        // Retry on next reconnect
+      }
+    }
+    openedOnce = true;
   };
 
   eventSource.onerror = () => {

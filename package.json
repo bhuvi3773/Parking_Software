@@ -4,6 +4,9 @@
   "description": "Zero-cost QR-to-Web-Ticket hotel valet parking system",
   "type": "module",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "start": "node --no-warnings src/server.js",
     "dev": "node --no-warnings --watch src/server.js",

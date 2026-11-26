@@ -279,4 +279,60 @@ describe('Valet HTTP API & Two-Sided Chat SSE', () => {
     assert.equal(css.status, 200);
     assert.match(css.headers.get('content-type'), /text\/css/);
   });
+
+  it('sets Secure cookie and resolves https QR URLs behind reverse proxies', async () => {
+    const { createBaseUrlResolver } = await import('../src/network.js');
+    const proxyStore = createValetDb(':memory:', { defaultPin: '1234' });
+    const proxySse = createSseHub({ heartbeatMs: 60000 });
+    const proxyApp = createApp({
+      store: proxyStore,
+      sse: proxySse,
+      resolveBaseUrl: createBaseUrlResolver(4100),
+    });
+
+    const srv = await new Promise((resolve) => {
+      const s = proxyApp.listen(0, '127.0.0.1', () => resolve(s));
+    });
+
+    try {
+      const port = srv.address().port;
+      const base = `http://127.0.0.1:${port}`;
+      const loginRes = await fetch(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-Proto': 'https',
+        },
+        body: JSON.stringify({ pin: '1234' }),
+      });
+      const setCookie = loginRes.headers.get('set-cookie');
+      assert.match(setCookie, /;\s*Secure/i);
+
+      const health = await new Promise((resolve, reject) => {
+        const req = http.get(
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: '/api/health',
+            headers: {
+              Host: 'valet.up.railway.app',
+              'X-Forwarded-Proto': 'https, http',
+            },
+          },
+          (res) => {
+            let body = '';
+            res.setEncoding('utf8');
+            res.on('data', (c) => (body += c));
+            res.on('end', () => resolve(JSON.parse(body)));
+          }
+        );
+        req.on('error', reject);
+      });
+      assert.equal(health.baseUrl, 'https://valet.up.railway.app');
+    } finally {
+      proxySse.closeAll();
+      await new Promise((resolve) => srv.close(resolve));
+      proxyStore.close();
+    }
+  });
 });

@@ -75,6 +75,7 @@ function buildWaMeUrl(phone, ticket) {
  */
 export function createApp({ store, sse, resolveBaseUrl }) {
   const app = express();
+  app.set('trust proxy', 1);
   app.use(express.json({ limit: '64kb' }));
 
   const sessionSecret = store.getSessionSecret();
@@ -113,9 +114,10 @@ export function createApp({ store, sse, resolveBaseUrl }) {
       return res.status(401).json({ error: 'Invalid valet PIN' });
     }
     const token = signSessionToken(sessionSecret, Date.now() + SESSION_TTL_MS);
+    const secureFlag = req.secure ? '; Secure' : '';
     res.setHeader(
       'Set-Cookie',
-      `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`
+      `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax${secureFlag}; Max-Age=${SESSION_TTL_MS / 1000}`
     );
     const settings = store.getSettings();
     return res.json({
@@ -124,8 +126,12 @@ export function createApp({ store, sse, resolveBaseUrl }) {
     });
   });
 
-  app.post('/api/auth/logout', (_req, res) => {
-    res.setHeader('Set-Cookie', `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`);
+  app.post('/api/auth/logout', (req, res) => {
+    const secureFlag = req.secure ? '; Secure' : '';
+    res.setHeader(
+      'Set-Cookie',
+      `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax${secureFlag}; Max-Age=0`
+    );
     res.json({ authenticated: false });
   });
 

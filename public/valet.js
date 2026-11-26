@@ -422,9 +422,24 @@ function connectValetSse() {
   if (state.sse) state.sse.close();
   const sse = new EventSource('/api/events');
   state.sse = sse;
+  let openedOnce = false;
 
-  sse.onopen = () => {
+  sse.onopen = async () => {
     sseStatusText.textContent = 'Live';
+    if (openedOnce) {
+      try {
+        const res = await fetch('/api/tickets');
+        if (res.ok) {
+          const data = await res.json();
+          state.active = data.active || [];
+          state.history = data.history || [];
+          renderAll();
+        }
+      } catch {
+        // Retry on next reconnect
+      }
+    }
+    openedOnce = true;
   };
 
   sse.onerror = () => {

@@ -30,8 +30,10 @@ export function getLanIp() {
  */
 export function createBaseUrlResolver(listenPort) {
   return (req) => {
-    const hostHeader = req.get('host') || `localhost:${listenPort}`;
-    const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+    const rawHost = req.get('x-forwarded-host') || req.get('host') || `localhost:${listenPort}`;
+    const hostHeader = rawHost.split(',')[0].trim();
+    const rawProto = req.get('x-forwarded-proto') || req.protocol || 'http';
+    const proto = rawProto.split(',')[0].trim() || 'http';
     const [hostname, portPart] = hostHeader.split(':');
     const port = portPart || String(listenPort);
 
